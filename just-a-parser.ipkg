@@ -10,6 +10,7 @@ modules =
   Me.Russoul.Text.Lexer,
   Me.Russoul.Text.Lexer.Token,
   Me.Russoul.Text.Parser,
-  Me.Russoul.Text.Parser.OverChar
+  Me.Russoul.Text.Parser.OverChar,
+  Me.Russoul.Text.Parser.OverToken
 
 sourcedir = "src"
