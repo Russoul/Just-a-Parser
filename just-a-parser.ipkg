@@ -1,0 +1,15 @@
+package just-a-parser
+authors = "Russoul"
+license = "BSD-3"
+bugtracker = "https://github.com/Russoul/Just-a-Parser"
+
+depends = contrib
+
+modules =
+  Me.Russoul.Data.Location,
+  Me.Russoul.Text.Lexer,
+  Me.Russoul.Text.Lexer.Token,
+  Me.Russoul.Text.Parser,
+  Me.Russoul.Text.Parser.OverChar
+
+sourcedir = "src"
