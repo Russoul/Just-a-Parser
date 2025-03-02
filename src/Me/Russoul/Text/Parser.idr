@@ -38,6 +38,8 @@ import Data.List
 import Data.Vect
 import Data.Maybe
 import Data.Nat
+
+import Me.Russoul.Data.Location
 import public Data.List1
 
 import public Text.Bounded
@@ -57,11 +59,9 @@ data Grammar : (state : Type) -> (tok : Type) -> Type -> Type where
      NextIs : String -> (tok -> Bool) -> Grammar state tok tok
      EOF : Grammar state tok ()
 
-     Fail : (location : Maybe Bounds) -> (fatal : Bool) -> String -> Grammar state tok ty
-     Try : Grammar state tok ty -> Grammar state tok ty
+     Fail : (location : Maybe Bounds) -> String -> Grammar state tok ty
 
      Commit : Grammar state tok ()
-     MustWork : Grammar state tok a -> Grammar state tok a
 
      Bind : Grammar state tok a
          -> (a -> Grammar state tok b)
@@ -114,9 +114,7 @@ join p = Bind p id
 export
 Functor (Grammar state tok) where
   map f (Empty val)  = Empty (f val)
-  map f (Fail bd fatal msg) = Fail bd fatal msg
-  map f (Try g) = Try (map f g)
-  map f (MustWork g) = MustWork (map f g)
+  map f (Fail bd msg) = Fail bd msg
   map f (Terminal msg g) = Terminal msg (map f . g)
   map f (Alt x y) = Alt (map f x) (map f y)
   map f (Bind act next)
@@ -197,9 +195,7 @@ mapToken f (Empty val) = Empty val
 mapToken f (Terminal msg g) = Terminal msg (g . f)
 mapToken f (NextIs msg g) = Bind (NextIs msg (g . f)) (Empty . f)
 mapToken f EOF = EOF
-mapToken f (Fail bd fatal msg) = Fail bd fatal msg
-mapToken f (Try g) = Try (mapToken f g)
-mapToken f (MustWork g) = MustWork (mapToken f g)
+mapToken f (Fail bd msg) = Fail bd msg
 mapToken f Commit = Commit
 mapToken f (Bind act next)
   = Bind (mapToken f act) (\x => mapToken f (next x))
@@ -233,29 +229,12 @@ terminal = Terminal
 ||| Always fail with a message
 export %inline
 fail : String -> Grammar state tok ty
-fail = Fail Nothing False
+fail = Fail Nothing
 
 ||| Always fail with a message and a location
 export %inline
 failLoc : Bounds -> String -> Grammar state tok ty
-failLoc b = Fail (Just b) False
-
-||| Fail with no possibility for recovery (i.e.
-||| no alternative parsing can succeed).
-export %inline
-fatalError : String -> Grammar state tok ty
-fatalError = Fail Nothing True
-
-||| Fail with no possibility for recovery (i.e.
-||| no alternative parsing can succeed).
-export %inline
-fatalLoc : Bounds -> String -> Grammar state tok ty
-fatalLoc b = Fail (Just b) True
-
-||| Catch a fatal error
-export %inline
-try : Grammar state tok ty -> Grammar state tok ty
-try = Try
+failLoc b = Fail (Just b)
 
 ||| Succeed if the input is empty
 export %inline
@@ -268,11 +247,6 @@ export %inline
 commit : Grammar state tok ()
 commit = Commit
 
-||| If the parser fails, treat it as a fatal error
-export %inline
-mustWork : Grammar state tok ty -> Grammar state tok ty
-mustWork = MustWork
-
 export %inline
 bounds : Grammar state tok ty -> Grammar state tok (WithBounds ty)
 bounds = Bounds
@@ -282,119 +256,134 @@ position : Grammar state tok Bounds
 position = Position
 
 public export
-data ParsingError tok st = Error String st (Maybe Bounds)
+data ParsingError tok st = Error String st (Maybe Bounds) (Maybe Bounds)
+
+showBounds : Maybe Bounds -> String
+showBounds (Just (MkBounds startLine startCol endLine endCol)) =
+  " @ L\{show (startLine + 1)}:\{show (startCol + 1)}-L\{show (endLine + 1)}:\{show (endCol + 1)}"
+showBounds Nothing = " @ (no recorded location)"
 
 export
 Show tok => Show (ParsingError tok st) where
-  show (Error s st Nothing) = "PARSING ERROR: " ++ s
-  show (Error s st (Just (MkBounds startLine startCol endLine endCol))) =
+  show (Error s st commitBounds errorBounds) =
     "PARSING ERROR: "
     ++ s
-    ++ " @ L\{show startLine}:\{show startCol}-L\{show endLine}:\{show endCol}"
+    ++ showBounds errorBounds
+    ++ "\nLast commit:"
+    ++ showBounds commitBounds
 
 data ParseResult : Type -> Type -> Type -> Type where
-     Failure : (committed : Bool)
-            -> (fatal : Bool)
-            -> List1 (ParsingError tok state)
-            -> ParseResult state tok ty
-     Res : state -> (committed : Bool) ->
+     Failure : ParsingError tok state -> ParseResult state tok ty
+     Res : state -> (committed : Maybe (Maybe Bounds)) ->
            (val : WithBounds ty) -> (more : List (WithBounds tok)) -> ParseResult state tok ty
 
 mergeWith : WithBounds ty -> ParseResult state tok sy -> ParseResult state tok sy
 mergeWith x (Res s committed val more) = Res s committed (mergeBounds x val) more
 mergeWith x v = v
 
+namespace A
+  export
+  (+) : Bounds -> Bounds -> Bounds
+  MkBounds l0 c0 l1 c1 + MkBounds l0' c0' l1' c1' =
+    let %hint
+        hint : Ord Point
+        hint = Inst
+    in
+    let (l, c) = if (l0, c0) < (l0', c0') then (l0, c0) else (l0', c0') in
+    let (l', c') = if (l1, c1) > (l1', c1') then (l1, c1) else (l1', c1') in
+    MkBounds l c l' c'
+
+namespace B
+  export
+  (+) : Maybe Bounds -> Maybe Bounds -> Maybe Bounds
+  Nothing + Nothing = Nothing
+  Nothing + Just x = Just x
+  Just x + Nothing = Just x
+  Just x + Just y = Just (x + y)
+
+
 doParse : state
-       -> (commit : Bool)
+       -> (commit : Maybe (Maybe Bounds))
+       -> (consumed : Maybe Bounds)
        -> (act : Grammar state tok ty)
        -> (xs : List (WithBounds tok))
        -> ParseResult state tok ty
-doParse s com (Empty val) xs = Res s com (irrelevantBounds val) xs
-doParse s com (Fail location fatal str) xs
-    = Failure com fatal (Error str s (location <|> (bounds <$> head' xs)) ::: Nil)
-doParse s com (Try g) xs = case doParse s com g xs of
-  -- recover from fatal match but still propagate the 'commit'
-  Failure com _ errs => Failure com False errs
-  res => res
-doParse s com Commit xs = Res s True (irrelevantBounds ()) xs
-doParse s com (MustWork g) xs =
-  case assert_total (doParse s com g xs) of
-       Failure com' _ errs => Failure com' True errs
-       res => res
-doParse s com (Terminal err f) [] = Failure com False (Error "End of input" s Nothing ::: Nil)
-doParse s com (Terminal err f) (x :: xs) =
+doParse s com consumed (Empty val) xs = Res s com (irrelevantBounds val) xs
+doParse s com consumed (Fail location str) xs
+    = Failure (Error str s (join com) (location <|> (bounds <$> head' xs)))
+doParse s com consumed Commit xs = Res s (Just consumed) (irrelevantBounds ()) xs
+doParse s com consumed (Terminal err f) [] = Failure (Error "End of input" s (join com) Nothing)
+doParse s com consumed (Terminal err f) (x :: xs) =
   case f x.val of
-       Nothing => Failure com False (Error err s (Just x.bounds) ::: Nil)
+       Nothing => Failure (Error err s (join com) (Just x.bounds))
        Just a => Res s com (const a <$> x) xs
-doParse s com EOF [] = Res s com (irrelevantBounds ()) []
-doParse s com EOF (x :: xs) = Failure com False (Error "Expected end of input" s (Just x.bounds) ::: Nil)
-doParse s com (NextIs err f) [] = Failure com False (Error "End of input" s Nothing ::: Nil)
-doParse s com (NextIs err f) (x :: xs)
+doParse s com consumed EOF [] = Res s com (irrelevantBounds ()) []
+doParse s com consumed EOF (x :: xs) = Failure (Error "Expected end of input" s (join com) (Just x.bounds))
+doParse s com consumed (NextIs err f) [] = Failure (Error "End of input" s (join com) Nothing)
+doParse s com consumed (NextIs err f) (x :: xs)
       = if f x.val
            then Res s com (removeIrrelevance x) (x :: xs)
-           else Failure com False (Error err s (Just x.bounds) ::: Nil)
-doParse s com (Alt x y) xs
-    = case doParse s False x xs of
-           Failure com' fatal errs
-              => if com' || fatal
+           else Failure (Error err s (join com) (Just x.bounds))
+doParse s com consumed (Alt x y) xs
+    = case doParse s Nothing consumed x xs of
+           err@(Failure (Error _ _ com' _))
+              => case com' of
                         -- If the alternative had committed, don't try the
                         -- other branch (and reset commit flag)
-                   then Failure com fatal errs
-                   else case (assert_total doParse s False y xs) of
-                             (Failure com'' fatal' errs') =>
-                               if com'' || fatal'
-                                  -- Only add the errors together if the second branch
-                                  -- is also non-committed and non-fatal.
-                                  then Failure com'' fatal' errs'
-                                  else Failure False False (errs ++ errs')
-                             (Res s _ val xs) => Res s com val xs
+                   Just consumedWhileCommited => err
+                   Nothing => case (assert_total doParse s Nothing consumed y xs) of
+                             err@(Failure (Error _ _  com' _)) =>
+                               case com' of
+                                  Just consumedWhileCommited => err
+                                  Nothing => Failure (Error "No alternative works" s (join com) consumed)
+                             Res s com' val xs => Res s (com' <|> com) val xs
            -- Successfully parsed the first option, so use the outer commit flag
-           Res s _ val xs => Res s com val xs
-doParse s com (Bind act next) xs
-    = case assert_total (doParse s com act xs) of
-           Failure com fatal errs => Failure com fatal errs
+           Res s com' val xs => Res s (com' <|> com) val xs
+doParse s com consumed (Bind act next) xs
+    = case assert_total (doParse s com consumed act xs) of
+           Failure err => Failure err
            Res s com v xs =>
-             mergeWith v (assert_total $ doParse s com (next v.val) xs)
-doParse s com (Bounds act) xs
-    = case assert_total (doParse s com act xs) of
-           Failure com fatal errs => Failure com fatal errs
+             mergeWith v (assert_total $ doParse s com (consumed + Just (bounds v)) (next v.val) xs)
+doParse s com consumed (Bounds act) xs
+    = case assert_total (doParse s com consumed act xs) of
+           Failure err => Failure err
            Res s com v xs => Res s com (const v <$> v) xs
-doParse s com Position [] = Failure com False (Error "End of input" s Nothing ::: Nil)
-doParse s com Position (x :: xs)
+doParse s com consumed Position [] = Failure (Error "End of input" s (join com) consumed)
+doParse s com consumed Position (x :: xs)
     = Res s com (irrelevantBounds x.bounds) (x :: xs)
-doParse s com (Set action) xs = Res action com (irrelevantBounds ()) xs
-doParse s com Get xs = Res s com (irrelevantBounds s) xs
+doParse s com consumed (Set action) xs = Res action com (irrelevantBounds ()) xs
+doParse s com consumed Get xs = Res s com (irrelevantBounds s) xs
 
 ||| Parse a list of tokens according to the given grammar. If successful,
 ||| returns a pair of the parse result and the unparsed tokens (the remaining
 ||| input).
 export
 parse : (act : Grammar () tok ty) -> (xs : List (WithBounds tok)) ->
-        Either (List1 (ParsingError tok ())) (ty, List (WithBounds tok))
+        Either (ParsingError tok ()) (WithBounds ty, List (WithBounds tok))
 parse act xs
-    = case doParse neutral False act xs of
-           Failure _ _ errs => Left errs
-           Res _ _ v rest => Right (v.val, rest)
+    = case doParse neutral Nothing Nothing act xs of
+           Failure err => Left err
+           Res _ _ v rest => Right (v, rest)
 
 export
 parseWith : state
          -> (act : Grammar state tok ty)
          -> (xs : List (WithBounds tok))
-         -> Either (List1 (ParsingError tok state)) (state, ty, List (WithBounds tok))
+         -> Either (ParsingError tok state) (state, WithBounds ty, List (WithBounds tok))
 parseWith st act xs
-    = case doParse st False act xs of
-           Failure _ _ errs => Left errs
-           Res s _ v rest => Right (s, v.val, rest)
+    = case doParse st Nothing Nothing act xs of
+           Failure err => Left err
+           Res s _ v rest => Right (s, v, rest)
 
 ||| Run the parser on the list of tokens,
 ||| expecting full consumption of the input.
 export
 parseAll : (act : Grammar () tok ty)
         -> (xs : List (WithBounds tok))
-        -> Either (List1 (ParsingError tok ())) ty
+        -> Either (ParsingError tok ()) (WithBounds ty)
 parseAll act xs = do
   (x, []) <- parse act xs
-    | (x, toks@(next :: _)) => Left (singleton $ Error "Some input left unconsumed" () (Just $ bounds next))
+    | (x, toks@(next :: _)) => Left (Error "Some input left unconsumed" () (Just x.bounds) (Just $ bounds next))
   Right x
 
 -----------------------------------------
@@ -651,10 +640,8 @@ mapState f (Empty val) = Empty val
 mapState f (Terminal str x) = Terminal str x
 mapState f (NextIs str x) = NextIs str x
 mapState f EOF = EOF
-mapState f (Fail location fatal str) = Fail location fatal str
-mapState f (Try x) = Try (mapState f x)
+mapState f (Fail location str) = Fail location str
 mapState f Commit = Commit
-mapState f (MustWork x) = MustWork (mapState f x)
 mapState f (Bind x y) = do
   v <- mapState f x
   mapState f (y v)

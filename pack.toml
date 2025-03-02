@@ -1,0 +1,7 @@
+[install]
+
+# Whether to install packages together with their
+# sources or not. This is mainly useful for programmers
+# who have set their editor up with some *go to definition*
+# functionality (for instance by using idris2-lsp with neovim).
+with-src   = true

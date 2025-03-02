@@ -168,28 +168,21 @@ asciiTokenMap = [(pred (== '\n'), const '\n')] ++ [(pred (== chr i), const (chr 
 export
 parseAll : (act : Grammar () Char ty)
         -> (xs : String)
-        -> Either (List1 (ParsingError Char ())) ty
+        -> Either (ParsingError Char ()) (WithBounds ty)
 parseAll act xs =
   let (toks, (l, c, rest)) = lex asciiTokenMap xs in
   case rest of
     "" => parseAll act toks
     _ => Left
-          $ singleton
           $ Error
               "Unrecognised character (only printable ASCII and newline symbols are supported)"
               ()
+              Nothing
               (Just (MkBounds l c l c))
 
 
 export
-parseAllFirstError : (act : Grammar () Char ty)
-                  -> (xs : String)
-                  -> Either (ParsingError Char ()) ty
-parseAllFirstError act xs =
-  mapFst head $ parseAll act xs
-
-export
 mbParseAll : (act : Grammar () Char ty)
           -> (xs : String)
-          -> Maybe ty
+          -> Maybe (WithBounds ty)
 mbParseAll act xs = eitherToMaybe $ parseAll act xs
