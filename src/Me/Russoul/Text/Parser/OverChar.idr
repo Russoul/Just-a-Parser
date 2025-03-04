@@ -166,23 +166,25 @@ asciiTokenMap = [(pred (== '\n'), const '\n')] ++ [(pred (== chr i), const (chr 
 ||| Run the parser on the string,
 ||| expecting full consumption of the input.
 export
-parseAll : (act : Grammar () Char ty)
+parseAll : s
+        -> (act : Grammar s Char ty)
         -> (xs : String)
-        -> Either (ParsingError Char ()) (WithBounds ty)
-parseAll act xs =
+        -> Either (ParsingError Char s) (s, WithBounds ty)
+parseAll st act xs =
   let (toks, (l, c, rest)) = lex asciiTokenMap xs in
   case rest of
-    "" => parseAll act toks
+    "" => Parser.parseAll st act toks
     _ => Left
           $ Error
               "Unrecognised character (only printable ASCII and newline symbols are supported)"
-              ()
+              st
               Nothing
               (Just (MkBounds l c l c))
 
 
 export
-mbParseAll : (act : Grammar () Char ty)
+mbParseAll : s
+          -> (act : Grammar s Char ty)
           -> (xs : String)
-          -> Maybe (WithBounds ty)
-mbParseAll act xs = eitherToMaybe $ parseAll act xs
+          -> Maybe (s, WithBounds ty)
+mbParseAll st act xs = eitherToMaybe $ parseAll st act xs

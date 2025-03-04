@@ -378,13 +378,14 @@ parseWith st act xs
 ||| Run the parser on the list of tokens,
 ||| expecting full consumption of the input.
 export
-parseAll : (act : Grammar () tok ty)
+parseAll : state
+        -> (act : Grammar state tok ty)
         -> (xs : List (WithBounds tok))
-        -> Either (ParsingError tok ()) (WithBounds ty)
-parseAll act xs = do
-  (x, []) <- parse act xs
-    | (x, toks@(next :: _)) => Left (Error "Some input left unconsumed" () (Just x.bounds) (Just $ bounds next))
-  Right x
+        -> Either (ParsingError tok state) (state, WithBounds ty)
+parseAll st act xs = do
+  (st, x, []) <- parseWith st act xs
+    | (st, x, toks@(next :: _)) => Left (Error "Some input left unconsumed" st (Just x.bounds) (Just $ bounds next))
+  Right (st, x)
 
 -----------------------------------------
 ----------- Library code ----------------
