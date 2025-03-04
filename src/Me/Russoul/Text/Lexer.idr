@@ -79,7 +79,7 @@ mkWithBounds Normal p ('-' :: '-' :: xs) =
 mkWithBounds Normal p ('{' :: '-' :: xs) =
   mkWithBounds InMultilineComment (p, (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('-' :: '-' :: xs) =
-  let p' = delta `apply2` p in
+  let p' = (((+1), id) `compose2` delta) `apply2` p in
   let w = MkBounded Whitespace False (mkBounds p p') in
   w :: mkWithBounds InSinglelineComment (p', (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('{' :: '-' :: xs) =
