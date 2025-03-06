@@ -1,6 +1,7 @@
 module Me.Russoul.Text.Parser.OverChar
 
 import public Me.Russoul.Text.Parser
+import public Me.Russoul.Data.Location
 
 import Data.Either
 import Data.Fin
