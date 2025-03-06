@@ -260,6 +260,11 @@ position = Position
 public export
 data ParsingError tok st = Error String st (Maybe Point) Bounds (List (WithBounds tok))
 
+showCommit : Maybe Point -> String
+showCommit (Just (l, c)) =
+  " @ L\{show (l + 1)}:\{show (c + 1)}"
+showCommit Nothing = "None"
+
 showBounds : Bounds -> String
 showBounds (MkBounds startLine startCol endLine endCol) =
   " @ L\{show (startLine + 1)}:\{show (startCol + 1)}-L\{show (endLine + 1)}:\{show (endCol + 1)}"
@@ -275,8 +280,8 @@ Show st => Show tok => Show (ParsingError tok st) where
     "PARSING ERROR: "
     ++ s
     ++ showBounds errorBounds
-    ++ "\nLast commit: "
-    ++ show commitBounds
+    ++ "\nLast commit:"
+    ++ showCommit commitBounds
     ++ "\nLeftover: "
     ++ showNextToken leftover
     ++ "\nState: "
