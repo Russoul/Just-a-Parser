@@ -19,7 +19,8 @@ record Indent where
 public export
 record State s where
   constructor MkState
-  parent : Indent
+  base : Indent
+  skip : Bool
   user : s
 
 ||| Specialised type of grammars
@@ -28,29 +29,35 @@ Rule : Type -> Type -> Type
 Rule s a = Grammar (State s) Token a
 
 export
-getIndent : Rule s Indent
-getIndent = parent <$> get
+getBaseIndent : Rule s Indent
+getBaseIndent = base <$> get
 
 export
-setIndent : Indent -> Rule s ()
-setIndent x = update {parent := x}
+getIndent : Rule s Indent
+getIndent = MkIndent <$> column
+
+export
+setBaseIndent : Indent -> Rule s ()
+setBaseIndent x = update {base := x}
 
 ||| Check that the indentation of the next token matches the target level
 export
-aligned : String -> Indent -> Rule s ()
-aligned msg info = do
+aligned : Indent -> Rule s ()
+aligned info = do
   col <- column
-  guard msg (col == info.column)
+  guard "Misalignment" (col == info.column)
+  update {skip := True}
 
 ||| Parse one token with the given condition.
-||| The token must be indented strictly more than the parent.
+||| The token must be indented strictly more than the base.
 export
 terminal : String -> (Token -> Maybe a) -> Rule s a
 terminal ruleName f = do
   st <- get
   col <- column
-  guard ("\{ruleName}: indentation check failed") (col > st.parent.column)
+  guard ("\{ruleName}: indentation check failed") (st.skip || col > st.base.column)
   result <- Text.Parser.terminal ruleName f
+  update {skip := False}
   pure result
 
 %hide Text.Parser.terminal
@@ -87,3 +94,6 @@ public export
 str_ : String -> Rule s ()
 str_ = ignore . str
 
+public export
+noIndent : Indent
+noIndent = MkIndent 0

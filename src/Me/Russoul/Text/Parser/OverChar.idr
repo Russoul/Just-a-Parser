@@ -18,32 +18,26 @@ public export
 Digit : Type
 Digit = Fin 10
 
-||| Define parsers as consuming grammars over characters.
 public export
-Parser : (s : Type) -> (ty : Type) -> Type
-Parser s ty = Grammar s Char ty
-
-||| Stateless char parser.
-public export
-CharParser : (ty : Type) -> Type
-CharParser ty = Grammar () Char ty
+Rule : (s : Type) -> (ty : Type) -> Type
+Rule s ty = Grammar s Char ty
 
 export
 toString : Foldable t
-        => Parser s (t Char)
-        -> Parser s String
+        => Rule s (t Char)
+        -> Rule s String
 toString p = map (foldr (\char, str => cast char ++ str) "") p
 
 export
-lower : Parser s Char
+lower : Rule s Char
 lower = terminal "lower" (\x => toMaybe (isLower x) x)
 
 export
-upper : Parser s Char
+upper : Rule s Char
 upper = terminal "upper" (\x => toMaybe (isUpper x) x)
 
 export
-alpha : Parser s Char
+alpha : Rule s Char
 alpha = terminal "alpha" (\x => toMaybe (isAlpha x) x)
 
 public export
@@ -61,11 +55,11 @@ mbDigit '9' = Just 9
 mbDigit _   = Nothing
 
 export
-digit : Parser s Digit
+digit : Rule s Digit
 digit = terminal "digit" mbDigit
 
 export
-digits : Parser s (List1 Digit)
+digits : Rule s (List1 Digit)
 digits = some digit
 
 littleEndianBase10ToNat : List Digit -> Nat
@@ -78,64 +72,64 @@ public export
   cast = littleEndianBase10ToNat . forget . reverse
 
 public export
-nat : Parser s Nat
+nat : Rule s Nat
 nat = map (cast @{BigEndianBase10}) digits
 
 ||| A two-digit base-10 natural number.
 ||| Leading zeros are allowed.
 export
-twoDigitNat : CharParser Nat
+twoDigitNat : Rule s Nat
 twoDigitNat = do
   d0 <- digit
   d1 <- digit
   pure (10 * finToNat d0 + finToNat d1)
 
 export
-alphaNum : Parser s Char
+alphaNum : Rule s Char
 alphaNum = terminal "alphanumeric" (\x => toMaybe (isAlphaNum x) x)
 
 export
-space : Parser s ()
+space : Rule s ()
 space = terminal "space" (\x => ignore $ toMaybe (x == ' ') x)
 
 ||| Parse an exact char. Case-sensetive.
 export
-char : Char -> Parser s Char
+char : Char -> Rule s Char
 char c = terminal (cast c) (\x => toMaybe (x == c) x)
 
 ||| Parse an exact char. Case-sensetive. Ignore the result.
 export
-char_ : Char -> Parser s ()
+char_ : Char -> Rule s ()
 char_ = ignore . char
 
 ||| Parse a chacter such that condition holds
 export
-such : (Char -> Bool) -> Parser s Char
+such : (Char -> Bool) -> Rule s Char
 such cond = terminal "notChar" (\x => toMaybe (cond x) x)
 
 ||| Parse one char from the list.
 ||| Prefer ones closer to the head of the list.
 ||| Fail if the list is empty or none of the chars matches.
 export
-oneOf : String -> Parser s Char
+oneOf : String -> Rule s Char
 oneOf str =
   case fastUnpack str of
     [] => fail "oneOf \"\""
     x :: rest => char x <|> go rest
  where
-  go : List Char -> Parser s Char
+  go : List Char -> Rule s Char
   go [] = fail "oneOf: no match"
   go (x :: xs) = char x <|> go xs
 
-||| Parser an exact char. Case-insensetive.
+||| Rule an exact char. Case-insensetive.
 export
-charLike : Char -> Parser s Char
+charLike : Char -> Rule s Char
 charLike c =
   char (toLower c) <|> char (toUpper c)
 
 ||| Non-empty string. Case-sensitive.
 export
-str : String -> Parser s String
+str : String -> Rule s String
 str c =
   case fastUnpack c of
     [] => fail "str \"\""
@@ -144,21 +138,59 @@ str c =
 
 ||| Non-empty string. Case-sensitive. Ignore the result.
 export
-str_ : String -> Parser s ()
+str_ : String -> Rule s ()
 str_ = ignore . str
 
 export
-newline : Parser s ()
+newline : Rule s ()
 newline =  str_ "\r\n" <|> str_ "\n"
 
 ||| Non-empty string. Case-insensitive.
 export
-strLike : String -> Parser s String
+strLike : String -> Rule s String
 strLike c =
   case fastUnpack c of
     [] => fail "strLike \"\""
     x :: xs => toString $
       seqList1 (map charLike (x ::: xs))
+
+public export
+subscriptDigit : Rule s Digit
+subscriptDigit =
+  is "₀" (== '₀') $> 0
+    <|>
+  is "₁" (== '₁') $> 1
+    <|>
+  is "₂" (== '₂') $> 2
+    <|>
+  is "₃" (== '₃') $> 3
+    <|>
+  is "₄" (== '₄') $> 4
+    <|>
+  is "₅" (== '₅') $> 5
+    <|>
+  is "₆" (== '₆') $> 6
+    <|>
+  is "₇" (== '₇') $> 7
+    <|>
+  is "₈" (== '₈') $> 8
+    <|>
+  is "₉" (== '₉') $> 9
+
+public export
+subscriptDigits : Rule s (List1 Digit)
+subscriptDigits = some subscriptDigit
+
+public export
+subscriptNat : Rule s Nat
+subscriptNat = do
+  n <- subscriptDigits
+  pure (convert ([<] <>< (forget n)) 1)
+ where
+  -- decimal = {1, 10, 100, ...}
+  convert : SnocList Digit -> (decimal : Nat) -> Nat
+  convert [<] _ = 0
+  convert (left :< x) decimal = convert left (decimal * 10) + finToNat x * decimal
 
 ||| ASCII printable characters and newline
 asciiTokenMap : TokenMap Char

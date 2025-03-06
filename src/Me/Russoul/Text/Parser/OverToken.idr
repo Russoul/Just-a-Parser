@@ -80,3 +80,40 @@ inParens p = do
   str_ ")"
   pure x
 
+public export
+subscriptDigit : Grammar st Token (Fin 10)
+subscriptDigit =
+  is "₀" (isSymbol (== '₀')) $> 0
+    <|>
+  is "₁" (isSymbol (== '₁')) $> 1
+    <|>
+  is "₂" (isSymbol (== '₂')) $> 2
+    <|>
+  is "₃" (isSymbol (== '₃')) $> 3
+    <|>
+  is "₄" (isSymbol (== '₄')) $> 4
+    <|>
+  is "₅" (isSymbol (== '₅')) $> 5
+    <|>
+  is "₆" (isSymbol (== '₆')) $> 6
+    <|>
+  is "₇" (isSymbol (== '₇')) $> 7
+    <|>
+  is "₈" (isSymbol (== '₈')) $> 8
+    <|>
+  is "₉" (isSymbol (== '₉')) $> 9
+
+public export
+subscriptDigits : Grammar st Token (List1 (Fin 10))
+subscriptDigits = some subscriptDigit
+
+public export
+subscriptNat : Grammar st Token Nat
+subscriptNat = do
+  n <- subscriptDigits
+  pure (convert ([<] <>< (forget n)) 1)
+ where
+  -- decimal = {1, 10, 100, ...}
+  convert : SnocList (Fin 10) -> (decimal : Nat) -> Nat
+  convert [<] _ = 0
+  convert (left :< x) decimal = convert left (decimal * 10) + finToNat x * decimal
