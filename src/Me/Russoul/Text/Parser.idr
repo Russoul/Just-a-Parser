@@ -40,6 +40,8 @@ import Data.Maybe
 import Data.Nat
 
 import Me.Russoul.Data.Location
+import Me.Russoul.Text.Bounded.Extra
+
 import public Data.List1
 
 import public Text.Bounded
@@ -70,7 +72,7 @@ data Grammar : (state : Type) -> (tok : Type) -> Type -> Type where
         -> Lazy (Grammar state tok ty)
         -> Grammar state tok ty
      Bounds : Grammar state tok ty -> Grammar state tok (WithBounds ty)
-     Position : Grammar state tok Bounds
+     Position : Grammar state tok Point
 
      Set : state -> Grammar state tok ()
      Get : Grammar state tok state
@@ -252,16 +254,15 @@ bounds : Grammar state tok ty -> Grammar state tok (WithBounds ty)
 bounds = Bounds
 
 export %inline
-position : Grammar state tok Bounds
+position : Grammar state tok Point
 position = Position
 
 public export
-data ParsingError tok st = Error String st (Maybe Bounds) (Maybe Bounds)
+data ParsingError tok st = Error String st (Maybe Point) Bounds
 
-showBounds : Maybe Bounds -> String
-showBounds (Just (MkBounds startLine startCol endLine endCol)) =
+showBounds : Bounds -> String
+showBounds (MkBounds startLine startCol endLine endCol) =
   " @ L\{show (startLine + 1)}:\{show (startCol + 1)}-L\{show (endLine + 1)}:\{show (endCol + 1)}"
-showBounds Nothing = " @ (no recorded location)"
 
 export
 Show tok => Show (ParsingError tok st) where
@@ -270,60 +271,46 @@ Show tok => Show (ParsingError tok st) where
     ++ s
     ++ showBounds errorBounds
     ++ "\nLast commit:"
-    ++ showBounds commitBounds
+    ++ show commitBounds
 
 data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok state -> ParseResult state tok ty
-     Res : state -> (committed : Maybe (Maybe Bounds)) ->
+     Res : state -> (committed : Maybe Point) ->
            (val : WithBounds ty) -> (more : List (WithBounds tok)) -> ParseResult state tok ty
 
 mergeWith : WithBounds ty -> ParseResult state tok sy -> ParseResult state tok sy
 mergeWith x (Res s committed val more) = Res s committed (mergeBounds x val) more
 mergeWith x v = v
 
-namespace A
-  export
-  (+) : Bounds -> Bounds -> Bounds
-  MkBounds l0 c0 l1 c1 + MkBounds l0' c0' l1' c1' =
-    let %hint
-        hint : Ord Point
-        hint = Inst
-    in
-    let (l, c) = if (l0, c0) < (l0', c0') then (l0, c0) else (l0', c0') in
-    let (l', c') = if (l1, c1) > (l1', c1') then (l1, c1) else (l1', c1') in
-    MkBounds l c l' c'
-
-namespace B
-  export
-  (+) : Maybe Bounds -> Maybe Bounds -> Maybe Bounds
-  Nothing + Nothing = Nothing
-  Nothing + Just x = Just x
-  Just x + Nothing = Just x
-  Just x + Just y = Just (x + y)
-
+export
+union : Maybe Bounds -> Maybe Bounds -> Maybe Bounds
+Nothing `union` Nothing = Nothing
+Nothing `union` Just x = Just x
+Just x `union` Nothing = Just x
+Just x `union` Just y = Just (x `union` y)
 
 doParse : state
-       -> (commit : Maybe (Maybe Bounds))
-       -> (consumed : Maybe Bounds)
+       -> (commit : Maybe Point)
+       -> (consumed : Point)
        -> (act : Grammar state tok ty)
        -> (xs : List (WithBounds tok))
        -> ParseResult state tok ty
 doParse s com consumed (Empty val) xs = Res s com (irrelevantBounds val) xs
 doParse s com consumed (Fail location str) xs
-    = Failure (Error str s (join com) (location <|> (bounds <$> head' xs)))
-doParse s com consumed Commit xs = Res s (Just consumed) (irrelevantBounds ()) xs
-doParse s com consumed (Terminal err f) [] = Failure (Error "End of input" s (join com) Nothing)
+    = Failure (Error str s com (fromMaybe (degenerate consumed) location))
+doParse s com consumed Commit xs = Res s (Just consumed) (MkBounded () True (degenerate consumed)) xs
+doParse s com consumed (Terminal err f) [] = Failure (Error "End of input" s com (degenerate consumed))
 doParse s com consumed (Terminal err f) (x :: xs) =
   case f x.val of
-       Nothing => Failure (Error err s (join com) (Just x.bounds))
+       Nothing => Failure (Error err s com x.bounds)
        Just a => Res s com (const a <$> x) xs
-doParse s com consumed EOF [] = Res s com (irrelevantBounds ()) []
-doParse s com consumed EOF (x :: xs) = Failure (Error "Expected end of input" s (join com) (Just x.bounds))
-doParse s com consumed (NextIs err f) [] = Failure (Error "End of input" s (join com) Nothing)
+doParse s com consumed EOF [] = Res s com (MkBounded () True (degenerate consumed)) []
+doParse s com consumed EOF (x :: xs) = Failure (Error "Expected end of input" s com x.bounds)
+doParse s com consumed (NextIs err f) [] = Failure (Error "End of input" s com (degenerate consumed))
 doParse s com consumed (NextIs err f) (x :: xs)
       = if f x.val
            then Res s com (removeIrrelevance x) (x :: xs)
-           else Failure (Error err s (join com) (Just x.bounds))
+           else Failure (Error err s com x.bounds)
 doParse s com consumed (Alt x y) xs
     = case doParse s Nothing consumed x xs of
            err@(Failure (Error _ _ com' _))
@@ -335,7 +322,7 @@ doParse s com consumed (Alt x y) xs
                              err@(Failure (Error _ _  com' _)) =>
                                case com' of
                                   Just consumedWhileCommited => err
-                                  Nothing => Failure (Error "No alternative works" s (join com) consumed)
+                                  Nothing => Failure (Error "No alternative works" s com (degenerate consumed))
                              Res s com' val xs => Res s (com' <|> com) val xs
            -- Successfully parsed the first option, so use the outer commit flag
            Res s com' val xs => Res s (com' <|> com) val xs
@@ -343,16 +330,14 @@ doParse s com consumed (Bind act next) xs
     = case assert_total (doParse s com consumed act xs) of
            Failure err => Failure err
            Res s com v xs =>
-             mergeWith v (assert_total $ doParse s com (consumed + Just (bounds v)) (next v.val) xs)
+             mergeWith v (assert_total $ doParse s com (endBounds v.bounds) (next v.val) xs)
 doParse s com consumed (Bounds act) xs
     = case assert_total (doParse s com consumed act xs) of
            Failure err => Failure err
            Res s com v xs => Res s com (const v <$> v) xs
-doParse s com consumed Position [] = Failure (Error "End of input" s (join com) consumed)
-doParse s com consumed Position (x :: xs)
-    = Res s com (irrelevantBounds x.bounds) (x :: xs)
-doParse s com consumed (Set action) xs = Res action com (irrelevantBounds ()) xs
-doParse s com consumed Get xs = Res s com (irrelevantBounds s) xs
+doParse s com consumed Position xs = Res s com (MkBounded consumed True (degenerate consumed)) xs
+doParse s com consumed (Set action) xs = Res action com (MkBounded () True (degenerate consumed)) xs
+doParse s com consumed Get xs = Res s com (MkBounded s True (degenerate consumed)) xs
 
 ||| Parse a list of tokens according to the given grammar. If successful,
 ||| returns a pair of the parse result and the unparsed tokens (the remaining
@@ -361,7 +346,7 @@ export
 parse : (act : Grammar () tok ty) -> (xs : List (WithBounds tok)) ->
         Either (ParsingError tok ()) (WithBounds ty, List (WithBounds tok))
 parse act xs
-    = case doParse neutral Nothing Nothing act xs of
+    = case doParse neutral Nothing (0, 0) act xs of
            Failure err => Left err
            Res _ _ v rest => Right (v, rest)
 
@@ -371,7 +356,7 @@ parseWith : state
          -> (xs : List (WithBounds tok))
          -> Either (ParsingError tok state) (state, WithBounds ty, List (WithBounds tok))
 parseWith st act xs
-    = case doParse st Nothing Nothing act xs of
+    = case doParse st Nothing (0, 0) act xs of
            Failure err => Left err
            Res s _ v rest => Right (s, v, rest)
 
@@ -384,7 +369,7 @@ parseAll : state
         -> Either (ParsingError tok state) (state, WithBounds ty)
 parseAll st act xs = do
   (st, x, []) <- parseWith st act xs
-    | (st, x, toks@(next :: _)) => Left (Error "Some input left unconsumed" st (Just x.bounds) (Just $ bounds next))
+    | (st, x, next :: _) => Left (Error "Some input left unconsumed" st (Just (endBounds x.bounds)) (next.bounds))
   Right (st, x)
 
 -----------------------------------------
@@ -570,16 +555,12 @@ between : (left : Grammar state tok l)
 between left right contents = left *> contents <* right
 
 export
-location : Grammar state token (Int, Int)
-location = startBounds <$> position
-
-export
-endLocation : Grammar state token (Int, Int)
-endLocation = endBounds <$> position
+line : Grammar state token Int
+line = fst <$> position
 
 export
 column : Grammar state token Int
-column = snd <$> location
+column = snd <$> position
 
 public export
 when : Bool -> Lazy (Grammar state token ()) -> Grammar state token ()

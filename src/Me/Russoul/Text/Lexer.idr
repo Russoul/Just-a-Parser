@@ -1,6 +1,7 @@
 module Me.Russoul.Text.Lexer
 
 import Me.Russoul.Data.Location
+import Me.Russoul.Text.Bounded.Extra
 import Me.Russoul.Text.Lexer.Token
 
 
@@ -23,25 +24,10 @@ compose2 (g, g') (f, f') = (g . f, g' . f')
     show' []        = ""
     show' (x :: xs) = "\n" ++ show x ++ show' xs
 
-min2 : (Int, Int) -> (Int, Int) -> (Int, Int)
-min2 (l, c) (l', c') =
-  ifThenElse (l < l') (l, c) $
-    ifThenElse (l == l') (ifThenElse (c < c') (l, c) (l', c')) $
-      (l', c')
-
-max2 : (Int, Int) -> (Int, Int) -> (Int, Int)
-max2 (l, c) (l', c') =
-  ifThenElse (l < l') (l', c') $
-    ifThenElse (l == l') (ifThenElse (c < c') (l', c') (l, c)) $
-      (l, c)
-
 ----------------------------------------------------------
 
 accountFor : Char -> (Bool, Int -> Int, Int -> Int)
 accountFor x = (isNL x || isSpace x, ifThenElse (isNL x) ((+ 1), const 0) (id, (+ 1)))
-
-mkBounds : (Int, Int) -> (Int, Int) -> Bounds
-mkBounds (startL, startC) (endL, endC) = MkBounds startL startC endL endC
 
 public export
 data State = InSinglelineComment | InMultilineComment | AccWhitespace | Normal
@@ -133,15 +119,6 @@ filterOutComments (MkBounded (Comment _) _ range :: xs) =
   mapFst (:< (cast range)) (filterOutComments xs)
 filterOutComments (x :: xs) =
   mapSnd (x ::) (filterOutComments xs)
-
-||| (s, e) ∪ (s', e') =
-||| (min (s, s'), max (e, e'))
-export
-union : Bounds -> Bounds -> Bounds
-union (MkBounds sl sc el ec) (MkBounds sl' sc' el' ec') =
-  let (minl, minc) = min2 (sl, sc) (sl', sc') in
-  let (maxl, maxc) = max2 (el, ec) (el', ec') in
-  MkBounds minl minc maxl maxc
 
 export
 mergeWhitespace : List (WithBounds Token) -> List (WithBounds Token)

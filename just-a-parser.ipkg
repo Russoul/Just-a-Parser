@@ -7,10 +7,12 @@ depends = contrib
 
 modules =
   Me.Russoul.Data.Location,
+  Me.Russoul.Text.Bounded.Extra,
   Me.Russoul.Text.Lexer,
   Me.Russoul.Text.Lexer.Token,
   Me.Russoul.Text.Parser,
   Me.Russoul.Text.Parser.OverChar,
-  Me.Russoul.Text.Parser.OverToken
+  Me.Russoul.Text.Parser.OverToken,
+  Me.Russoul.Text.Parser.OverTokenIndent
 
 sourcedir = "src"

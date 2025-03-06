@@ -179,7 +179,7 @@ parseAll st act xs =
               "Unrecognised character (only printable ASCII and newline symbols are supported)"
               st
               Nothing
-              (Just (MkBounds l c l c))
+              (MkBounds l c l c)
 
 
 export
