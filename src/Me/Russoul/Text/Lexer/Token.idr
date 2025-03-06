@@ -14,7 +14,7 @@ data Token : Type where
 
 public export
 Show Token where
-  show (Symbol c) = "'\{show c}'"
+  show (Symbol c) = "\{show c}"
   show Whitespace = "␣"
   show (Comment com) = "/*\{fastPack (cast com)}*/"
 

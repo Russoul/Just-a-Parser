@@ -15,6 +15,10 @@ record Indent where
   constructor MkIndent
   column : Int
 
+public export
+Show Indent where
+  show (MkIndent c) = "MkIdent {column = \{show c}}"
+
 ||| Indentation level & user state
 public export
 record State s where
@@ -22,6 +26,10 @@ record State s where
   base : Indent
   skip : Bool
   user : s
+
+public export
+Show a => Show (State a) where
+  show (MkState base skip user) = "MkState {base = \{show base}, skip = \{show skip}, user = \{show user}}"
 
 ||| Specialised type of grammars
 public export

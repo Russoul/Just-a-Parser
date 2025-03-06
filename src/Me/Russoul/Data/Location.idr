@@ -17,21 +17,6 @@ public export
 Point : Type
 Point = (Int, Int)
 
-export
-min2 : Point -> Point -> Point
-min2 (l, c) (l', c') =
-  ifThenElse (l < l') (l, c) $
-    ifThenElse (l == l') (ifThenElse (c < c') (l, c) (l', c')) $
-      (l', c')
-
-export
-max2 : Point -> Point -> Point
-max2 (l, c) (l', c') =
-  ifThenElse (l < l') (l', c') $
-    ifThenElse (l == l') (ifThenElse (c < c') (l', c') (l, c)) $
-      (l, c)
-
-
 namespace Ord.Point
   ||| Total order over Point.
   ||| Order induced over the pair of first components
@@ -42,6 +27,24 @@ namespace Ord.Point
       case compare l l' of
         EQ => compare c c'
         r  => r
+
+export
+min2 : Point -> Point -> Point
+min2 a b =
+  if a < b then a else b
+ where
+  %hint
+  instance : Ord Point
+  instance = Inst
+
+export
+max2 : Point -> Point -> Point
+max2 a b =
+  if a > b then a else b
+ where
+  %hint
+  instance : Ord Point
+  instance = Inst
 
 ||| Location of some entity in a symbolic array.
 ||| Has start and end points.

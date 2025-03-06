@@ -65,7 +65,7 @@ mkWithBounds Normal p ('-' :: '-' :: xs) =
 mkWithBounds Normal p ('{' :: '-' :: xs) =
   mkWithBounds InMultilineComment (p, (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('-' :: '-' :: xs) =
-  let p' = (((+1), id) `compose2` delta) `apply2` p in
+  let p' = delta `apply2` p in
   let w = MkBounded Whitespace False (mkBounds p p') in
   w :: mkWithBounds InSinglelineComment (p', (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('{' :: '-' :: xs) =
@@ -89,20 +89,18 @@ mkWithBounds AccWhitespace (p, delta) (x :: xs) =
     True => mkWithBounds AccWhitespace (p, delta' `compose2` delta) xs
     -- This will fail on windows                  vvvv
 mkWithBounds InSinglelineComment (p, delta, str) ('\n' :: xs) =
-  let p' = delta `apply2` p in
+  let p' = ((+1), const 0) `apply2` (delta `apply2` p) in
   let comment = MkBounded (Comment str) False (mkBounds p p') in
-  let p'' = ((+ 1), const 0) `apply2` p' in
-  comment :: mkWithBounds Normal p'' xs
+  comment :: mkWithBounds Normal p' xs
     -- BUG:
     -- This will fail on windows (and not only?) vvvv
 mkWithBounds InMultilineComment (p, delta, str) ('\n' :: xs) =
   -- As soon as we hit a new line,
   -- we ship a comment token and continue
   -- we do this to keep us to single-line semantic tokens only.
-  let p' = delta `apply2` p in
+  let p' = ((+ 1), const 0) `apply2` (delta `apply2` p) in
   let comment = MkBounded (Comment str) False (mkBounds p p') in
-  let p'' = ((+ 1), const 0) `apply2` p' in
-  comment :: mkWithBounds InMultilineComment (p'', (id, id), str) xs
+  comment :: mkWithBounds InMultilineComment (p', (id, id), str) xs
 mkWithBounds InMultilineComment (p, delta, str) ('-' :: '}' :: xs) =
   let p' = ((id, (+ 2)) `compose2` delta) `apply2` p in
   let comment = MkBounded (Comment str) False (mkBounds p p') in
@@ -116,7 +114,7 @@ export
 filterOutComments : List (WithBounds Token) -> (SnocList Range, List (WithBounds Token))
 filterOutComments [] = ([<], [])
 filterOutComments (MkBounded (Comment _) _ range :: xs) =
-  mapFst (:< (cast range)) (filterOutComments xs)
+  bimap (:< (cast range)) (MkBounded Whitespace True range ::) (filterOutComments xs)
 filterOutComments (x :: xs) =
   mapSnd (x ::) (filterOutComments xs)
 
