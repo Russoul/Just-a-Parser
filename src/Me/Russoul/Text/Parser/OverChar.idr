@@ -1,7 +1,8 @@
 module Me.Russoul.Text.Parser.OverChar
 
 import public Me.Russoul.Text.Parser
-import public Me.Russoul.Data.Location
+import public Me.Russoul.Text.Position
+import public Me.Russoul.Text.Range
 
 import Data.Either
 import Data.Fin
@@ -196,23 +197,26 @@ subscriptNat = do
 asciiTokenMap : TokenMap Char
 asciiTokenMap = [(pred (== '\n'), const '\n')] ++ [(pred (== chr i), const (chr i)) | i <- [32..126]]
 
+transform : WithBounds a -> (Range, a)
+transform (MkBounded val _ range) = (cast range, val)
+
 ||| Run the parser on the string,
 ||| expecting full consumption of the input.
 export
 parseAll : s
         -> (act : Grammar s Char ty)
         -> (xs : String)
-        -> Either (ParsingError Char s) (s, WithBounds ty)
+        -> Either (ParsingError Char s) (s, Range, ty)
 parseAll st act xs =
   let (toks, (l, c, rest)) = lex asciiTokenMap xs in
   case rest of
-    "" => Parser.parseAll st act toks
+    "" => Parser.parseAll st act (map transform toks)
     _ => Left
           $ Error
               "Unrecognised character (only printable ASCII and newline symbols are supported)"
               st
               Nothing
-              (MkBounds l c l c)
+              (MkRange (MkPosition l c) (MkPosition l c))
               []
 
 
@@ -220,5 +224,5 @@ export
 mbParseAll : s
           -> (act : Grammar s Char ty)
           -> (xs : String)
-          -> Maybe (s, WithBounds ty)
+          -> Maybe (s, Range, ty)
 mbParseAll st act xs = eitherToMaybe $ parseAll st act xs

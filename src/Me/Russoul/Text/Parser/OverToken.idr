@@ -1,6 +1,5 @@
 module Me.Russoul.Text.Parser.OverToken
 
-import Me.Russoul.Data.Location
 import Me.Russoul.Text.Lexer.Token
 import Me.Russoul.Text.Lexer
 import public Me.Russoul.Text.Parser

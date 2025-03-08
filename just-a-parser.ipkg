@@ -6,7 +6,6 @@ bugtracker = "https://github.com/Russoul/Just-a-Parser"
 depends = contrib
 
 modules =
-  Me.Russoul.Data.Location,
   Me.Russoul.Text.Bounded.Extra,
   Me.Russoul.Text.Lexer,
   Me.Russoul.Text.Lexer.Token,
@@ -14,5 +13,7 @@ modules =
   Me.Russoul.Text.Parser.OverChar,
   Me.Russoul.Text.Parser.OverToken,
   Me.Russoul.Text.Parser.OverTokenIndent
+  Me.Russoul.Text.Position,
+  Me.Russoul.Text.Range,
 
 sourcedir = "src"

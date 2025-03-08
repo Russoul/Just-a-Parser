@@ -1,6 +1,5 @@
 module Me.Russoul.Text.Parser.OverTokenIndent
 
-import Me.Russoul.Data.Location
 import Me.Russoul.Text.Lexer.Token
 import Me.Russoul.Text.Parser
 

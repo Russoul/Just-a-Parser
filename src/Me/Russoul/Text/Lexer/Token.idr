@@ -4,19 +4,18 @@ import Data.SnocList
 
 public export
 data Token : Type where
- ||| Doesn't contain whitespace.
- ||| TODO Replace Char with a type that guarantees that assumption.
+ ||| Can't be whitespace
  Symbol : Char -> Token
- ||| Fusion of consecutive whitespace symbols, including newline (' ', '\n', etc.).
+ ||| Fusion of consecutive whitespace symbols, including newline (' ', '\n', etc.)
  Whitespace : Token
- ||| Fusion of symbols that are part of a comment.
+ ||| Fusion of symbols that are part of a comment. Can't cross line boundary
  Comment : SnocList Char -> Token
 
 public export
 Show Token where
-  show (Symbol c) = "\{show c}"
-  show Whitespace = "␣"
-  show (Comment com) = "/*\{fastPack (cast com)}*/"
+  show (Symbol c) = "Symbol \{show c}"
+  show Whitespace = "Whitespace"
+  show (Comment com) = "Comment \{show com}"
 
 public export
 isSymbol : (Char -> Bool) -> Token -> Bool
@@ -35,9 +34,3 @@ isComment _ = False
 
 public export
 isToken : Token -> Bool -> Token -> Maybe Token
-
-public export
-toChar : Token -> Char
-toChar (Symbol c) = c
-toChar Whitespace = ' '
-toChar (Comment _) = '/'

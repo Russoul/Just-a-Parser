@@ -1,7 +1,7 @@
 module Me.Russoul.Text.Lexer
 
-import Me.Russoul.Data.Location
-import Me.Russoul.Text.Bounded.Extra
+import Me.Russoul.Text.Position
+import Me.Russoul.Text.Range
 import Me.Russoul.Text.Lexer.Token
 
 
@@ -9,8 +9,8 @@ import Text.Bounded
 
 ---------------------- Abstract util ---------------------
 
-apply2 : (a -> b, a' -> b') -> (a, a') -> (b, b')
-apply2 (f, g) (x, y) = (f x, g y)
+apply2 : (Int -> Int, Int -> Int) -> Position -> Position
+apply2 (f, g) (MkPosition x y) = MkPosition (f x) (g y)
 
 compose2 : (b -> c, b' -> c') -> (a -> b, a' -> b') -> (a -> c, a' -> c')
 compose2 (g, g') (f, f') = (g . f, g' . f')
@@ -44,19 +44,19 @@ state inSinglelineComment inMultilineComment accWhitespace normal Normal = norma
 ||| Combines single-line comments into one token.
 export
 mkWithBounds : (accW : State)
-            -> state ((Int, Int), (Int -> Int, Int -> Int), SnocList Char)
-                     ((Int, Int), (Int -> Int, Int -> Int), SnocList Char)
-                     ((Int, Int), (Int -> Int, Int -> Int))
-                     (Int, Int)
+            -> state (Position, (Int -> Int, Int -> Int), SnocList Char)
+                     (Position, (Int -> Int, Int -> Int), SnocList Char)
+                     (Position, (Int -> Int, Int -> Int))
+                     Position
                      accW
             -> List Char
-            -> List (WithBounds Token)
+            -> List (Range, Token)
 mkWithBounds InSinglelineComment (p, delta, comment) [] =
   let p' = delta `apply2` p in
-  [MkBounded (Comment comment) False (mkBounds p p')]
+  [(MkRange p p', Comment comment)]
 mkWithBounds InMultilineComment (p, delta, comment) [] =
   let p' = delta `apply2` p in
-  [MkBounded (Comment comment) False (mkBounds p p')]
+  [(MkRange p p', Comment comment)]
 -- Remove the trailing whitespace
 mkWithBounds AccWhitespace (p, delta) [] = []
 mkWithBounds Normal _ [] = []
@@ -66,18 +66,18 @@ mkWithBounds Normal p ('{' :: '-' :: xs) =
   mkWithBounds InMultilineComment (p, (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('-' :: '-' :: xs) =
   let p' = delta `apply2` p in
-  let w = MkBounded Whitespace False (mkBounds p p') in
+  let w = (MkRange p p', Whitespace) in
   w :: mkWithBounds InSinglelineComment (p', (id, (+ 2)), [<]) xs
 mkWithBounds AccWhitespace (p, delta) ('{' :: '-' :: xs) =
   let p' = delta `apply2` p in
-  let w = MkBounded Whitespace False (mkBounds p p') in
+  let w = (MkRange p p', Whitespace) in
   w :: mkWithBounds InMultilineComment (p', (id, (+ 2)), [<]) xs
 mkWithBounds Normal p (x :: xs) =
   let (isW, delta) = accountFor x in
   case isW of
     False =>
       let p' = delta `apply2` p in
-      MkBounded (Symbol x) False (mkBounds p p') :: mkWithBounds Normal p' xs
+      (MkRange p p', Symbol x) :: mkWithBounds Normal p' xs
     True => mkWithBounds AccWhitespace (p, delta) xs
 mkWithBounds AccWhitespace (p, delta) (x :: xs) =
   let (isW, delta') = accountFor x in
@@ -85,12 +85,12 @@ mkWithBounds AccWhitespace (p, delta) (x :: xs) =
     False =>
       let p' = delta `apply2` p in
       let p'' = (delta' `compose2` delta) `apply2` p in
-      MkBounded Whitespace False (mkBounds p p') :: MkBounded (Symbol x) False (mkBounds p' p'') :: mkWithBounds Normal p'' xs
+      (MkRange p p', Whitespace) :: (MkRange p' p'', Symbol x) :: mkWithBounds Normal p'' xs
     True => mkWithBounds AccWhitespace (p, delta' `compose2` delta) xs
     -- This will fail on windows                  vvvv
 mkWithBounds InSinglelineComment (p, delta, str) ('\n' :: xs) =
   let p' = ((+1), const 0) `apply2` (delta `apply2` p) in
-  let comment = MkBounded (Comment str) False (mkBounds p p') in
+  let comment = (MkRange p p', Comment str) in
   comment :: mkWithBounds Normal p' xs
     -- BUG:
     -- This will fail on windows (and not only?) vvvv
@@ -99,11 +99,11 @@ mkWithBounds InMultilineComment (p, delta, str) ('\n' :: xs) =
   -- we ship a comment token and continue
   -- we do this to keep us to single-line semantic tokens only.
   let p' = ((+ 1), const 0) `apply2` (delta `apply2` p) in
-  let comment = MkBounded (Comment str) False (mkBounds p p') in
+  let comment = (MkRange p p', Comment str) in
   comment :: mkWithBounds InMultilineComment (p', (id, id), str) xs
 mkWithBounds InMultilineComment (p, delta, str) ('-' :: '}' :: xs) =
   let p' = ((id, (+ 2)) `compose2` delta) `apply2` p in
-  let comment = MkBounded (Comment str) False (mkBounds p p') in
+  let comment = (MkRange p p', Comment str) in
   comment :: mkWithBounds Normal p' xs
 mkWithBounds InSinglelineComment (p, delta, str) (x :: xs) =
   mkWithBounds InSinglelineComment (p, (id, (+ 1)) `compose2` delta, str :< x) xs
@@ -111,31 +111,31 @@ mkWithBounds InMultilineComment (p, delta, str) (x :: xs) =
   mkWithBounds InMultilineComment (p, (id, (+ 1)) `compose2` delta, str :< x) xs
 
 export
-filterOutComments : List (WithBounds Token) -> (SnocList Range, List (WithBounds Token))
+filterOutComments : List (Range, Token) -> (SnocList Range, List (Range, Token))
 filterOutComments [] = ([<], [])
-filterOutComments (MkBounded (Comment _) _ range :: xs) =
-  bimap (:< (cast range)) (MkBounded Whitespace True range ::) (filterOutComments xs)
+filterOutComments ((range, Comment _) :: xs) =
+  bimap (:< range) ((range, Whitespace) ::) (filterOutComments xs)
 filterOutComments (x :: xs) =
   mapSnd (x ::) (filterOutComments xs)
 
 export
-mergeWhitespace : List (WithBounds Token) -> List (WithBounds Token)
+mergeWhitespace : List (Range, Token) -> List (Range, Token)
 mergeWhitespace [] = []
-mergeWhitespace (MkBounded Whitespace r p :: MkBounded Whitespace r' p' :: xs) =
-  mergeWhitespace (MkBounded Whitespace (r || r') (union p p') :: xs)
+mergeWhitespace ((p, Whitespace) :: (p', Whitespace) :: xs) =
+  mergeWhitespace ((union p p', Whitespace) :: xs)
 mergeWhitespace (x :: xs) = x :: mergeWhitespace xs
 
 export
-removeLeadingWhitespace : List (WithBounds Token) -> List (WithBounds Token)
+removeLeadingWhitespace : List (Range, Token) -> List (Range, Token)
 removeLeadingWhitespace [] = []
-removeLeadingWhitespace (MkBounded Whitespace {} :: xs) =
+removeLeadingWhitespace ((_, Whitespace) :: xs) =
   removeLeadingWhitespace xs
 removeLeadingWhitespace (x :: xs) = x :: xs
 
 export
-removeTrailingWhitespace : List (WithBounds Token) -> List (WithBounds Token)
+removeTrailingWhitespace : List (Range, Token) -> List (Range, Token)
 removeTrailingWhitespace [] = []
-removeTrailingWhitespace [MkBounded Whitespace {}] = []
+removeTrailingWhitespace [(_, Whitespace)] = []
 removeTrailingWhitespace (x :: xs) = x :: removeTrailingWhitespace xs
 
 namespace Show.Token
@@ -155,9 +155,9 @@ namespace Show.Token
     show xs = show @{NLSepList @{WithBoundsBriefInst}} xs
 
 export
-tokenise : List Char -> (SnocList Range, List (WithBounds Token))
+tokenise : List Char -> (SnocList Range, List (Range, Token))
 tokenise = mapSnd removeLeadingWhitespace
          . mapSnd removeTrailingWhitespace
          . mapSnd mergeWhitespace
-         . filterOutComments --vvvvvv We count starting at 0 for both axes,
-         . mkWithBounds Normal (0, 0) -- solely because LSP expects this format.
+         . filterOutComments  --vvvvvvvvvvvvvv We count starting at 0 for both axes,
+         . mkWithBounds Normal (MkPosition 0 0) -- solely because LSP expects this format.
