@@ -12,8 +12,8 @@ modules =
   Me.Russoul.Text.Parser,
   Me.Russoul.Text.Parser.OverChar,
   Me.Russoul.Text.Parser.OverToken,
-  Me.Russoul.Text.Parser.OverTokenIndent
+  Me.Russoul.Text.Parser.OverTokenIndent,
   Me.Russoul.Text.Position,
-  Me.Russoul.Text.Range,
+  Me.Russoul.Text.Range
 
 sourcedir = "src"

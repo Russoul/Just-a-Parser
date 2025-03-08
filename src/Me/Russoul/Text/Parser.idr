@@ -365,7 +365,7 @@ doParse s com consumed (Bind act next) xs
     = case assert_total (doParse s com consumed act xs) of
            Failure err => Failure err
            Res s com b v consumed xs =>
-             mergeWith b v (assert_total $ doParse s com consumed (next v) xs)
+             mergeWith b v (doParse s com consumed (next v) xs)
 doParse s com consumed (Bounds act) xs
     = case assert_total (doParse s com consumed act xs) of
            Failure err => Failure err

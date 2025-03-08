@@ -7,29 +7,15 @@ import Me.Russoul.Text.Lexer.Token
 
 import Text.Bounded
 
----------------------- Abstract util ---------------------
-
 apply2 : (Int -> Int, Int -> Int) -> Position -> Position
 apply2 (f, g) (MkPosition x y) = MkPosition (f x) (g y)
 
 compose2 : (b -> c, b' -> c') -> (a -> b, a' -> b') -> (a -> c, a' -> c')
 compose2 (g, g') (f, f') = (g . f, g' . f')
 
-[NLSepList]
-(inner : Show a) => Show (List a) where
-  show []        = ""
-  show (x :: xs) = show x ++ show' xs
-   where
-    show' : List a -> String
-    show' []        = ""
-    show' (x :: xs) = "\n" ++ show x ++ show' xs
-
-----------------------------------------------------------
-
 accountFor : Char -> (Bool, Int -> Int, Int -> Int)
 accountFor x = (isNL x || isSpace x, ifThenElse (isNL x) ((+ 1), const 0) (id, (+ 1)))
 
-public export
 data State = InSinglelineComment | InMultilineComment | AccWhitespace | Normal
 
 ||| Recusion principle for State.
@@ -42,7 +28,6 @@ state inSinglelineComment inMultilineComment accWhitespace normal Normal = norma
 ||| Populates bounds information.
 ||| Combines consecutive whitespace symbols into one token.
 ||| Combines single-line comments into one token.
-export
 mkWithBounds : (accW : State)
             -> state (Position, (Int -> Int, Int -> Int), SnocList Char)
                      (Position, (Int -> Int, Int -> Int), SnocList Char)
@@ -110,7 +95,6 @@ mkWithBounds InSinglelineComment (p, delta, str) (x :: xs) =
 mkWithBounds InMultilineComment (p, delta, str) (x :: xs) =
   mkWithBounds InMultilineComment (p, (id, (+ 1)) `compose2` delta, str :< x) xs
 
-export
 filterOutComments : List (Range, Token) -> (SnocList Range, List (Range, Token))
 filterOutComments [] = ([<], [])
 filterOutComments ((range, Comment _) :: xs) =
@@ -118,41 +102,22 @@ filterOutComments ((range, Comment _) :: xs) =
 filterOutComments (x :: xs) =
   mapSnd (x ::) (filterOutComments xs)
 
-export
 mergeWhitespace : List (Range, Token) -> List (Range, Token)
 mergeWhitespace [] = []
 mergeWhitespace ((p, Whitespace) :: (p', Whitespace) :: xs) =
   mergeWhitespace ((union p p', Whitespace) :: xs)
 mergeWhitespace (x :: xs) = x :: mergeWhitespace xs
 
-export
 removeLeadingWhitespace : List (Range, Token) -> List (Range, Token)
 removeLeadingWhitespace [] = []
 removeLeadingWhitespace ((_, Whitespace) :: xs) =
   removeLeadingWhitespace xs
 removeLeadingWhitespace (x :: xs) = x :: xs
 
-export
 removeTrailingWhitespace : List (Range, Token) -> List (Range, Token)
 removeTrailingWhitespace [] = []
 removeTrailingWhitespace [(_, Whitespace)] = []
 removeTrailingWhitespace (x :: xs) = x :: removeTrailingWhitespace xs
-
-namespace Show.Token
-  public export
-  [BriefInst] Show Token where
-    show (Symbol x) = cast x
-    show Whitespace = " "
-    show (Comment str) = "/"
-
-  public export
-  [WithBoundsBriefInst] Show (WithBounds Token) where
-    show (MkBounded tok isIrr (MkBounds l c l' c')) =
-      show @{BriefInst} tok ++ "(\{show l}:\{show c}-\{show l'}:\{show c'})"
-
-  public export
-  [WithBoundsBriefListInst] Show (List (WithBounds Token)) where
-    show xs = show @{NLSepList @{WithBoundsBriefInst}} xs
 
 export
 tokenise : List Char -> (SnocList Range, List (Range, Token))

@@ -22,7 +22,6 @@ union (MkRange s e) (MkRange s' e') =
   let e'' = max e e' in
   MkRange s'' e''
 
-
 public export
 Show Range where
   show (MkRange s e) = "MkRange {start = \{show s}, end = \{show e}}"

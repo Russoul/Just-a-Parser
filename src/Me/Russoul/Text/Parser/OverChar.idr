@@ -68,7 +68,6 @@ littleEndianBase10ToNat [] = 0
 littleEndianBase10ToNat (x :: xs) = finToNat x + 10 * littleEndianBase10ToNat xs
 
 ||| Big-endian string of base10 digits to Nat
-public export
 [BigEndianBase10] Cast (List1 Digit) Nat where
   cast = littleEndianBase10ToNat . forget . reverse
 
@@ -218,7 +217,6 @@ parseAll st act xs =
               Nothing
               (MkRange (MkPosition l c) (MkPosition l c))
               []
-
 
 export
 mbParseAll : s
