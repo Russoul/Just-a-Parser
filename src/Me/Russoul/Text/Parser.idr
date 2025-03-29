@@ -334,7 +334,7 @@ doParse s com consumed (Empty val) xs = Res s com (degenerate consumed) val cons
 doParse s com consumed (Fail location str) xs
     = Failure (Error str s com (fromMaybe (degenerate consumed) location) xs)
 doParse s com consumed Commit xs = Res s (Just consumed) (degenerate consumed) () consumed xs
-doParse s com consumed (Terminal err f) [] = Failure (Error "End of input" s com (degenerate consumed) [])
+doParse s com consumed (Terminal err f) [] = Failure (Error err s com (degenerate consumed) [])
 doParse s com consumed (Terminal err f) ((bounds, x) :: xs) =
   case f x of
        Nothing => Failure (Error err s com bounds ((bounds, x) :: xs))
