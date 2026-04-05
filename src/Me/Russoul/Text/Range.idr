@@ -15,6 +15,10 @@ public export
 degenerate : Position -> Range
 degenerate p = MkRange p p
 
+public export
+isDegenerate : Range -> Bool
+isDegenerate (MkRange p p') = p == p'
+
 export
 union : Range -> Range -> Range
 union (MkRange s e) (MkRange s' e') =

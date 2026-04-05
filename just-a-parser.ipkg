@@ -2,6 +2,7 @@ package just-a-parser
 authors = "Russoul"
 license = "BSD-3"
 bugtracker = "https://github.com/Russoul/Just-a-Parser"
+version = "0.1.1"
 
 depends = contrib
 

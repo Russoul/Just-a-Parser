@@ -321,7 +321,8 @@ data ParseResult : Type -> Type -> Type -> Type where
         -> ParseResult st tok ty
 
 mergeWith : Range -> ty -> ParseResult st tok sy -> ParseResult st tok sy
-mergeWith b x (Res s committed b' val consumed more) = Res s committed (union b b') val consumed more
+mergeWith b x (Res s committed b' val consumed more) =
+  Res s committed (if isDegenerate b then b' else union b b') val consumed more
 mergeWith b x v = v
 
 doParse : st
