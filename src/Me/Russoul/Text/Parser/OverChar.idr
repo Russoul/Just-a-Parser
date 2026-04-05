@@ -205,7 +205,7 @@ export
 parseAll : s
         -> (act : Grammar s Char ty)
         -> (xs : String)
-        -> Either (ParsingError Char s) (s, Range, ty)
+        -> Either (ParsingError Char s) (s, Maybe Range, ty)
 parseAll st act xs =
   let (toks, (l, c, rest)) = lex asciiTokenMap xs in
   case rest of
@@ -215,12 +215,12 @@ parseAll st act xs =
               "Unrecognised character (only printable ASCII and newline symbols are supported)"
               st
               Nothing
-              (MkRange (MkPosition l c) (MkPosition l c))
+              (Right (MkPosition l c))
               []
 
 export
 mbParseAll : s
           -> (act : Grammar s Char ty)
           -> (xs : String)
-          -> Maybe (s, Range, ty)
+          -> Maybe (s, Maybe Range, ty)
 mbParseAll st act xs = eitherToMaybe $ parseAll st act xs

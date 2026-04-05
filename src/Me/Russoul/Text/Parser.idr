@@ -75,7 +75,7 @@ data Grammar : (state : Type) -> (tok : Type) -> Type -> Type where
         -> Lazy (Grammar state tok ty)
         -> Grammar state tok ty
      ||| A grammar that runs the argument grammar and attaches the boundary to the result.
-     Bounds : Grammar state tok ty -> Grammar state tok (Range, ty)
+     Bounds : Grammar state tok ty -> Grammar state tok (Maybe Range, ty)
      ||| Position of the "cursor" (i.e. the end point of the boundary of the last parsed token)
      Position : Grammar state tok Position
      ||| Set the state.
@@ -256,7 +256,7 @@ commit : Grammar state tok ()
 commit = Commit
 
 export %inline
-bounds : Grammar state tok ty -> Grammar state tok (Range, ty)
+bounds : Grammar state tok ty -> Grammar state tok (Maybe Range, ty)
 bounds = Bounds
 
 export %inline
@@ -269,7 +269,7 @@ record ParsingError tok st where
   msg : String
   state : st
   commit : Maybe Position
-  range : Range
+  range : Either Range Position
   leftover : List (Range, tok)
 
 namespace Show
@@ -281,6 +281,11 @@ namespace Show
   [Range] Show Range where
     show (MkRange (MkPosition startLine startCol) (MkPosition endLine endCol)) =
       "@ L\{show (startLine + 1)}:\{show (startCol + 1)}-L\{show (endLine + 1)}:\{show (endCol + 1)}"
+
+  public export
+  [RangeOrPosition] Show (Either Range Position) where
+    show (Left x) = show @{Range} x
+    show (Right x) = show @{Position} x
 
   public export
   [Commit] Show (Maybe Position) where
@@ -302,7 +307,7 @@ Show st => Show tok => Show (ParsingError tok st) where
     "PARSING ERROR: "
     ++ s
     ++ " "
-    ++ show @{Range} errorBounds
+    ++ show @{RangeOrPosition} errorBounds
     ++ "\n"
     ++ show @{Commit} commitBounds
     ++ "\n"
@@ -314,15 +319,21 @@ data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok st -> ParseResult st tok ty
      Res : st
         -> (committed : Maybe Position)
-        -> (bounds : Range)
+        -> (bounds : Maybe Range)
         -> (val : ty)
         -> (consumed : Position)
         -> (more : List (Range, tok))
         -> ParseResult st tok ty
 
-mergeWith : Range -> ty -> ParseResult st tok sy -> ParseResult st tok sy
+merge : Maybe Range -> Maybe Range -> Maybe Range
+merge Nothing Nothing = Nothing
+merge (Just x) Nothing = Just x
+merge Nothing (Just y) = Just y
+merge (Just x) (Just y) = Just (x + y)
+
+mergeWith : Maybe Range -> ty -> ParseResult st tok sy -> ParseResult st tok sy
 mergeWith b x (Res s committed b' val consumed more) =
-  Res s committed (if isDegenerate b then b' else union b b') val consumed more
+  Res s committed (merge b b') val consumed more
 mergeWith b x v = v
 
 doParse : st
@@ -331,22 +342,22 @@ doParse : st
        -> (act : Grammar st tok ty)
        -> (xs : List (Range, tok))
        -> ParseResult st tok ty
-doParse s com consumed (Empty val) xs = Res s com (degenerate consumed) val consumed xs
+doParse s com consumed (Empty val) xs = Res s com Nothing val consumed xs
 doParse s com consumed (Fail location str) xs
-    = Failure (Error str s com (fromMaybe (degenerate consumed) location) xs)
-doParse s com consumed Commit xs = Res s (Just consumed) (degenerate consumed) () consumed xs
-doParse s com consumed (Terminal err f) [] = Failure (Error err s com (degenerate consumed) [])
+    = Failure (Error str s com (case location of Just x => Left x; Nothing => Right consumed) xs)
+doParse s com consumed Commit xs = Res s (Just consumed) Nothing () consumed xs
+doParse s com consumed (Terminal err f) [] = Failure (Error err s com (Right consumed) [])
 doParse s com consumed (Terminal err f) ((bounds, x) :: xs) =
   case f x of
-       Nothing => Failure (Error err s com bounds ((bounds, x) :: xs))
-       Just a => Res s com bounds a bounds.end xs
-doParse s com consumed EOF [] = Res s com (degenerate consumed) () consumed []
-doParse s com consumed EOF ((r, x) :: xs) = Failure (Error "Expected end of input" s com r ((r, x) :: xs))
-doParse s com consumed (NextIs err f) [] = Failure (Error "End of input" s com (degenerate consumed) [])
+       Nothing => Failure (Error err s com (Left bounds) ((bounds, x) :: xs))
+       Just a => Res s com (Just bounds) a bounds.end xs
+doParse s com consumed EOF [] = Res s com Nothing () consumed []
+doParse s com consumed EOF ((r, x) :: xs) = Failure (Error "Expected end of input" s com (Left r) ((r, x) :: xs))
+doParse s com consumed (NextIs err f) [] = Failure (Error "End of input (\{err})" s com (Right consumed) [])
 doParse s com consumed (NextIs err f) ((bounds, x) :: xs)
       = if f x
-           then Res s com bounds x consumed ((bounds, x) :: xs)
-           else Failure (Error err s com bounds ((bounds, x) :: xs))
+           then Res s com (Just bounds) x consumed ((bounds, x) :: xs)
+           else Failure (Error err s com (Left bounds) ((bounds, x) :: xs))
 doParse s com consumed (Alt x y) xs
     = case doParse s Nothing consumed x xs of
            err@(Failure (Error _ _ com' _ _))
@@ -358,7 +369,7 @@ doParse s com consumed (Alt x y) xs
                              err@(Failure (Error _ _  com' _ _)) =>
                                case com' of
                                   Just consumedWhileCommited => err
-                                  Nothing => Failure (Error "No alternative works" s com (degenerate consumed) xs)
+                                  Nothing => Failure (Error "No alternative works" s com (Right consumed) xs)
                              Res s com' val bounds consumed xs => Res s (com' <|> com) val bounds consumed xs
            -- Successfully parsed the first option, so use the outer commit flag
            Res s com' val bounds consumed xs => Res s (com' <|> com) val bounds consumed xs
@@ -371,16 +382,16 @@ doParse s com consumed (Bounds act) xs
     = case assert_total (doParse s com consumed act xs) of
            Failure err => Failure err
            Res s com b v consumed xs => Res s com b (b, v) consumed xs
-doParse s com consumed Position xs = Res s com (degenerate consumed) consumed consumed xs
-doParse _ com consumed (Set s) xs = Res s com (degenerate consumed) () consumed xs
-doParse s com consumed Get xs = Res s com (degenerate consumed) s consumed xs
+doParse s com consumed Position xs = Res s com Nothing consumed consumed xs
+doParse _ com consumed (Set s) xs = Res s com Nothing () consumed xs
+doParse s com consumed Get xs = Res s com Nothing s consumed xs
 
 ||| Parse a list of tokens according to the given grammar. If successful,
 ||| returns a pair of the parse result and the unparsed tokens (the remaining
 ||| input).
 export
 parse : (act : Grammar () tok ty) -> (xs : List (Range, tok)) ->
-        Either (ParsingError tok ()) (Range, ty, List (Range, tok))
+        Either (ParsingError tok ()) (Maybe Range, ty, List (Range, tok))
 parse act xs
     = case doParse neutral Nothing (MkPosition 0 0) act xs of
            Failure err => Left err
@@ -390,7 +401,7 @@ export
 parseWith : st
          -> (act : Grammar st tok ty)
          -> (xs : List (Range, tok))
-         -> Either (ParsingError tok st) (st, Range, ty, List (Range, tok))
+         -> Either (ParsingError tok st) (st, Maybe Range, ty, List (Range, tok))
 parseWith st act xs
     = case doParse st Nothing (MkPosition 0 0) act xs of
            Failure err => Left err
@@ -402,10 +413,10 @@ export
 parseAll : st
         -> (act : Grammar st tok ty)
         -> (xs : List (Range, tok))
-        -> Either (ParsingError tok st) (st, Range, ty)
+        -> Either (ParsingError tok st) (st, Maybe Range, ty)
 parseAll st act xs = do
   (st, b, x, []) <- parseWith st act xs
-    | (st, b, x, leftover@((next, _) :: _)) => Left (Error "Some input left unconsumed" st (Just b.end) next leftover)
+    | (st, b, x, leftover@((next, _) :: _)) => Left (Error "Some input left unconsumed" st (map end b) (Left next) leftover)
   Right (st, b, x)
 
 -----------------------------------------

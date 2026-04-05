@@ -4,20 +4,12 @@ import Me.Russoul.Text.Position
 import Text.Bounded
 
 ||| Range of symbols in a text file (think of a visual selection that can span multiple lines but also be degenerate in length)
-||| Assume: start ≤ end
+||| Assume: start < end
 public export
 record Range where
   constructor MkRange
   start : Position
   end : Position
-
-public export
-degenerate : Position -> Range
-degenerate p = MkRange p p
-
-public export
-isDegenerate : Range -> Bool
-isDegenerate (MkRange p p') = p == p'
 
 export
 union : Range -> Range -> Range
