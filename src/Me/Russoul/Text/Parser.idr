@@ -39,6 +39,7 @@ import Data.Vect
 import Data.Maybe
 import Data.Nat
 
+import Data.String
 import Me.Russoul.Text.Position
 import Me.Russoul.Text.Range
 
@@ -321,11 +322,28 @@ errorPos e = case e.range of
   Left r  => r.start
   Right p => p
 
+||| Merge two expectation messages failing at the SAME position into
+||| an "either" listing, deduplicating (a message already contained in
+||| the other is absorbed, so repeated merges of the same terminal
+||| stay flat).
+mergeMsg : String -> String -> String
+mergeMsg a b =
+  if b `isInfixOf` a then a
+  else if a `isInfixOf` b then b
+  else a ++ " OR " ++ b
+
 ||| The more informative of two failures: the one that reached
-||| further into the input (it knows better what went wrong); the
-||| first wins ties, preserving alternation priority.
+||| further into the input (it knows better what went wrong). At the
+||| SAME position neither knows better — their expectations MERGE
+||| ("Expected symbol: ( OR identifier start ..."), the classic
+||| expected-token listing. Otherwise the first wins structure
+||| (state, leftover), preserving alternation priority.
 furthest : ParsingError tok st -> ParsingError tok st -> ParsingError tok st
-furthest e1 e2 = if errorPos e2 > errorPos e1 then e2 else e1
+furthest e1 e2 =
+  case compare (errorPos e2) (errorPos e1) of
+    GT => e2
+    LT => e1
+    EQ => { msg := mergeMsg e1.msg e2.msg } e1
 
 data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok st -> ParseResult st tok ty
