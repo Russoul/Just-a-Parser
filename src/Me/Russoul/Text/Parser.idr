@@ -315,6 +315,18 @@ Show st => Show tok => Show (ParsingError tok st) where
     ++ "\n"
     ++ show @{State} st
 
+||| The position a parsing error points at.
+errorPos : ParsingError tok st -> Position
+errorPos e = case e.range of
+  Left r  => r.start
+  Right p => p
+
+||| The more informative of two failures: the one that reached
+||| further into the input (it knows better what went wrong); the
+||| first wins ties, preserving alternation priority.
+furthest : ParsingError tok st -> ParsingError tok st -> ParsingError tok st
+furthest e1 e2 = if errorPos e2 > errorPos e1 then e2 else e1
+
 data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok st -> ParseResult st tok ty
      Res : st
@@ -360,16 +372,22 @@ doParse s com consumed (NextIs err f) ((bounds, x) :: xs)
            else Failure (Error err s com (Left bounds) ((bounds, x) :: xs))
 doParse s com consumed (Alt x y) xs
     = case doParse s Nothing consumed x xs of
-           err@(Failure (Error _ _ com' _ _))
+           err@(Failure e1@(Error _ _ com' _ _))
               => case com' of
                         -- If the alternative had committed, don't try the
                         -- other branch (and reset commit flag)
                    Just consumedWhileCommited => err
                    Nothing => case (assert_total doParse s Nothing consumed y xs) of
-                             err@(Failure (Error _ _  com' _ _)) =>
+                             err@(Failure e2@(Error _ _  com' _ _)) =>
                                case com' of
                                   Just consumedWhileCommited => err
-                                  Nothing => Failure (Error "No alternative works" s com (Right consumed) xs)
+                                  -- FURTHEST-FAILURE TRACKING: keep
+                                  -- the branch error that reached
+                                  -- deepest instead of fabricating a
+                                  -- positionless "No alternative
+                                  -- works" — the outer commit flag is
+                                  -- restored for display
+                                  Nothing => Failure ({ commit := com } (furthest e1 e2))
                              Res s com' val bounds consumed xs => Res s (com' <|> com) val bounds consumed xs
            -- Successfully parsed the first option, so use the outer commit flag
            Res s com' val bounds consumed xs => Res s (com' <|> com) val bounds consumed xs
