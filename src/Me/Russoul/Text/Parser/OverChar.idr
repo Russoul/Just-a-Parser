@@ -212,7 +212,7 @@ parseAll st act xs =
     "" => Parser.parseAll st act (map transform toks)
     _ => Left
           $ Error
-              "Unrecognised character (only printable ASCII and newline symbols are supported)"
+              ["Unrecognised character (only printable ASCII and newline symbols are supported)"]
               st
               Nothing
               (Right (MkPosition l c))

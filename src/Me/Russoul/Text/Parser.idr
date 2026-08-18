@@ -267,11 +267,23 @@ position = Position
 public export
 record ParsingError tok st where
   constructor Error
-  msg : String
+  ||| The expectations accumulated at this failure position, in the
+  ||| order they were first seen and DEDUPLICATED. Kept as a list and
+  ||| rendered only when an error is actually reported (`showExpected`):
+  ||| a successful parse merges these many times per position and then
+  ||| discards them, so no string is built along the way.
+  expected : List String
   state : st
   commit : Maybe Position
   range : Either Range Position
   leftover : List (Range, tok)
+
+||| Render an expectation list as the classic "either" listing.
+||| Called ONCE, when a failure is finally reported.
+public export
+showExpected : List String -> String
+showExpected xs = joinBy " OR " xs
+
 
 namespace Show
   public export
@@ -304,9 +316,9 @@ namespace Show
 
 export
 Show st => Show tok => Show (ParsingError tok st) where
-  show (Error s st commitBounds errorBounds leftover) =
+  show (Error expected st commitBounds errorBounds leftover) =
     "PARSING ERROR: "
-    ++ s
+    ++ showExpected expected
     ++ " "
     ++ show @{RangeOrPosition} errorBounds
     ++ "\n"
@@ -322,15 +334,14 @@ errorPos e = case e.range of
   Left r  => r.start
   Right p => p
 
-||| Merge two expectation messages failing at the SAME position into
-||| an "either" listing, deduplicating (a message already contained in
-||| the other is absorbed, so repeated merges of the same terminal
-||| stay flat).
-mergeMsg : String -> String -> String
-mergeMsg a b =
-  if b `isInfixOf` a then a
-  else if a `isInfixOf` b then b
-  else a ++ " OR " ++ b
+||| Merge two expectation lists failing at the SAME position, keeping
+||| the first list's order and appending only what is new. Repeated
+||| merges of the same terminal stay flat, as before — but by list
+||| membership on short strings rather than by substring search over a
+||| steadily growing message, which was quadratic in the number of
+||| alternatives at a position and dominated parsing.
+mergeExpected : List String -> List String -> List String
+mergeExpected a b = a ++ filter (\x => not (elem x a)) b
 
 ||| The more informative of two failures: the one that reached
 ||| further into the input (it knows better what went wrong). At the
@@ -343,7 +354,7 @@ furthest e1 e2 =
   case compare (errorPos e2) (errorPos e1) of
     GT => e2
     LT => e1
-    EQ => { msg := mergeMsg e1.msg e2.msg } e1
+    EQ => { expected := mergeExpected e1.expected e2.expected } e1
 
 data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok st -> ParseResult st tok ty
@@ -374,20 +385,20 @@ doParse : st
        -> ParseResult st tok ty
 doParse s com consumed (Empty val) xs = Res s com Nothing val consumed xs
 doParse s com consumed (Fail location str) xs
-    = Failure (Error str s com (case location of Just x => Left x; Nothing => Right consumed) xs)
+    = Failure (Error [str] s com (case location of Just x => Left x; Nothing => Right consumed) xs)
 doParse s com consumed Commit xs = Res s (Just consumed) Nothing () consumed xs
-doParse s com consumed (Terminal err f) [] = Failure (Error err s com (Right consumed) [])
+doParse s com consumed (Terminal err f) [] = Failure (Error [err] s com (Right consumed) [])
 doParse s com consumed (Terminal err f) ((bounds, x) :: xs) =
   case f x of
-       Nothing => Failure (Error err s com (Left bounds) ((bounds, x) :: xs))
+       Nothing => Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs))
        Just a => Res s com (Just bounds) a bounds.end xs
 doParse s com consumed EOF [] = Res s com Nothing () consumed []
-doParse s com consumed EOF ((r, x) :: xs) = Failure (Error "Expected end of input" s com (Left r) ((r, x) :: xs))
-doParse s com consumed (NextIs err f) [] = Failure (Error "End of input (\{err})" s com (Right consumed) [])
+doParse s com consumed EOF ((r, x) :: xs) = Failure (Error ["Expected end of input"] s com (Left r) ((r, x) :: xs))
+doParse s com consumed (NextIs err f) [] = Failure (Error ["End of input (\{err})"] s com (Right consumed) [])
 doParse s com consumed (NextIs err f) ((bounds, x) :: xs)
       = if f x
            then Res s com (Just bounds) x consumed ((bounds, x) :: xs)
-           else Failure (Error err s com (Left bounds) ((bounds, x) :: xs))
+           else Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs))
 doParse s com consumed (Alt x y) xs
     = case doParse s Nothing consumed x xs of
            err@(Failure e1@(Error _ _ com' _ _))
@@ -452,7 +463,7 @@ parseAll : st
         -> Either (ParsingError tok st) (st, Maybe Range, ty)
 parseAll st act xs = do
   (st, b, x, []) <- parseWith st act xs
-    | (st, b, x, leftover@((next, _) :: _)) => Left (Error "Some input left unconsumed" st (map end b) (Left next) leftover)
+    | (st, b, x, leftover@((next, _) :: _)) => Left (Error ["Some input left unconsumed"] st (map end b) (Left next) leftover)
   Right (st, b, x)
 
 -----------------------------------------
