@@ -279,10 +279,15 @@ record ParsingError tok st where
   leftover : List (Range, tok)
 
 ||| Render an expectation list as the classic "either" listing.
-||| Called ONCE, when a failure is finally reported.
+||| Called ONCE, when a failure is finally reported — so the substring
+||| absorption that used to run on every merge (an expectation already
+||| contained in another is redundant to print) is paid here instead,
+||| on a short deduplicated list, and only for an error a human will
+||| actually read.
 public export
 showExpected : List String -> String
-showExpected xs = joinBy " OR " xs
+showExpected xs =
+  joinBy " OR " (filter (\x => not (any (\y => x /= y && isInfixOf x y) xs)) xs)
 
 
 namespace Show
