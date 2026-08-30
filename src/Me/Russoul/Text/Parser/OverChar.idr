@@ -217,6 +217,7 @@ parseAll st act xs =
               Nothing
               (Right (MkPosition l c))
               []
+              False
 
 export
 mbParseAll : s

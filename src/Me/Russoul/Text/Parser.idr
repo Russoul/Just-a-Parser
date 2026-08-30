@@ -64,7 +64,11 @@ data Grammar : (state : Type) -> (tok : Type) -> Type -> Type where
      ||| A grammar that doesn't consume and succeeds if there are no more tokens to consume.
      EOF : Grammar state tok ()
      ||| A grammar that immediately fails with optional boundary and message.
-     Fail : (location : Maybe Range) -> String -> Grammar state tok ty
+     ||| A FATAL failure is not "this branch did not match" but "this
+     ||| input is wrong, and here is why": `Alt` stops trying siblings
+     ||| when it sees one, and `furthest` prefers it over any ordinary
+     ||| failure however deep. See `fatal`.
+     Fail : (fatal : Bool) -> (location : Maybe Range) -> String -> Grammar state tok ty
      ||| A grammar that commits what has been parsed so far.
      Commit : Grammar state tok ()
      ||| A grammar the runs the first grammar then the next one provided the result of the first.
@@ -123,7 +127,7 @@ join p = Bind p id
 export
 Functor (Grammar state tok) where
   map f (Empty val)  = Empty (f val)
-  map f (Fail bd msg) = Fail bd msg
+  map f (Fail fat bd msg) = Fail fat bd msg
   map f (Terminal msg g) = Terminal msg (map f . g)
   map f (Alt x y) = Alt (map f x) (map f y)
   map f (Bind act next)
@@ -204,7 +208,7 @@ mapToken f (Empty val) = Empty val
 mapToken f (Terminal msg g) = Terminal msg (g . f)
 mapToken f (NextIs msg g) = Bind (NextIs msg (g . f)) (Empty . f)
 mapToken f EOF = EOF
-mapToken f (Fail bd msg) = Fail bd msg
+mapToken f (Fail fat bd msg) = Fail fat bd msg
 mapToken f Commit = Commit
 mapToken f (Bind act next)
   = Bind (mapToken f act) (\x => mapToken f (next x))
@@ -235,15 +239,42 @@ export %inline
 terminal : String -> (tok -> Maybe a) -> Grammar state tok a
 terminal = Terminal
 
-||| Always fail with a message
+||| Always fail with a message.
+|||
+||| This is a BRANCH REJECTION: inside an alternation it says only
+||| that this branch does not match, and the reported failure is
+||| whichever branch reached furthest — so a message raised here is
+||| routinely outrun by a sibling's and never seen. Diagnose after the
+||| choice, or use `fatal`.
 export %inline
 fail : String -> Grammar state tok ty
-fail = Fail Nothing
+fail = Fail False Nothing
 
 ||| Always fail with a message and a location
 export %inline
 failLoc : Range -> String -> Grammar state tok ty
-failLoc b = Fail (Just b)
+failLoc b = Fail False (Just b)
+
+||| Fail with a message that is a VERDICT, not a branch rejection:
+||| enough input has been read to know that no parse can succeed, and
+||| this message is the reason. `Alt` stops trying alternatives when
+||| one branch fails fatally, and a fatal failure outranks any
+||| ordinary one in the furthest-failure comparison, so the message
+||| survives to be reported.
+|||
+||| Because it escapes alternation, it also escapes `optional`, `many`
+||| and `some` — a fatal failure inside one aborts the whole
+||| repetition instead of ending it. Use it only where the input is
+||| genuinely doomed: if a sibling branch could still parse what was
+||| read, `fail` is the correct combinator.
+export %inline
+fatal : String -> Grammar state tok ty
+fatal = Fail True Nothing
+
+||| `fatal` at a known span.
+export %inline
+fatalLoc : Range -> String -> Grammar state tok ty
+fatalLoc b = Fail True (Just b)
 
 ||| Succeed if the input is empty
 export %inline
@@ -277,6 +308,10 @@ record ParsingError tok st where
   commit : Maybe Position
   range : Either Range Position
   leftover : List (Range, tok)
+  ||| raised by `fatal`: a verdict about the input rather than a
+  ||| branch that did not match. Outranks any ordinary failure in
+  ||| `furthest`, and stops `Alt` trying the other branch.
+  fatal : Bool
 
 ||| Render an expectation list as the classic "either" listing.
 ||| Called ONCE, when a failure is finally reported — so the substring
@@ -321,7 +356,7 @@ namespace Show
 
 export
 Show st => Show tok => Show (ParsingError tok st) where
-  show (Error expected st commitBounds errorBounds leftover) =
+  show (Error expected st commitBounds errorBounds leftover _) =
     "PARSING ERROR: "
     ++ showExpected expected
     ++ " "
@@ -354,12 +389,20 @@ mergeExpected a b = a ++ filter (\x => not (elem x a)) b
 ||| ("Expected symbol: ( OR identifier start ..."), the classic
 ||| expected-token listing. Otherwise the first wins structure
 ||| (state, leftover), preserving alternation priority.
+|||
+||| A FATAL failure is outside that comparison: it is a verdict about
+||| the input, not a branch that read less far, so it beats an
+||| ordinary failure however deep that one got. Two fatal failures
+||| compare as usual.
 furthest : ParsingError tok st -> ParsingError tok st -> ParsingError tok st
 furthest e1 e2 =
-  case compare (errorPos e2) (errorPos e1) of
-    GT => e2
-    LT => e1
-    EQ => { expected := mergeExpected e1.expected e2.expected } e1
+  case (e1.fatal, e2.fatal) of
+    (True, False) => e1
+    (False, True) => e2
+    _ => case compare (errorPos e2) (errorPos e1) of
+           GT => e2
+           LT => e1
+           EQ => { expected := mergeExpected e1.expected e2.expected } e1
 
 data ParseResult : Type -> Type -> Type -> Type where
      Failure : ParsingError tok st -> ParseResult st tok ty
@@ -389,31 +432,35 @@ doParse : st
        -> (xs : List (Range, tok))
        -> ParseResult st tok ty
 doParse s com consumed (Empty val) xs = Res s com Nothing val consumed xs
-doParse s com consumed (Fail location str) xs
-    = Failure (Error [str] s com (case location of Just x => Left x; Nothing => Right consumed) xs)
+doParse s com consumed (Fail fat location str) xs
+    = Failure (Error [str] s com (case location of Just x => Left x; Nothing => Right consumed) xs fat)
 doParse s com consumed Commit xs = Res s (Just consumed) Nothing () consumed xs
-doParse s com consumed (Terminal err f) [] = Failure (Error [err] s com (Right consumed) [])
+doParse s com consumed (Terminal err f) [] = Failure (Error [err] s com (Right consumed) [] False)
 doParse s com consumed (Terminal err f) ((bounds, x) :: xs) =
   case f x of
-       Nothing => Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs))
+       Nothing => Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs) False)
        Just a => Res s com (Just bounds) a bounds.end xs
 doParse s com consumed EOF [] = Res s com Nothing () consumed []
-doParse s com consumed EOF ((r, x) :: xs) = Failure (Error ["Expected end of input"] s com (Left r) ((r, x) :: xs))
-doParse s com consumed (NextIs err f) [] = Failure (Error ["End of input (\{err})"] s com (Right consumed) [])
+doParse s com consumed EOF ((r, x) :: xs) = Failure (Error ["Expected end of input"] s com (Left r) ((r, x) :: xs) False)
+doParse s com consumed (NextIs err f) [] = Failure (Error ["End of input (\{err})"] s com (Right consumed) [] False)
 doParse s com consumed (NextIs err f) ((bounds, x) :: xs)
       = if f x
            then Res s com (Just bounds) x consumed ((bounds, x) :: xs)
-           else Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs))
+           else Failure (Error [err] s com (Left bounds) ((bounds, x) :: xs) False)
 doParse s com consumed (Alt x y) xs
     = case doParse s Nothing consumed x xs of
-           err@(Failure e1@(Error _ _ com' _ _))
-              => case com' of
+           err@(Failure e1)
+              => case (e1.commit, e1.fatal) of
                         -- If the alternative had committed, don't try the
-                        -- other branch (and reset commit flag)
-                   Just consumedWhileCommited => err
-                   Nothing => case (assert_total doParse s Nothing consumed y xs) of
-                             err@(Failure e2@(Error _ _  com' _ _)) =>
-                               case com' of
+                        -- other branch (and reset commit flag). A FATAL
+                        -- failure ends the alternation for the same
+                        -- reason: it is a verdict about the input, so no
+                        -- sibling can parse it either.
+                   (Just consumedWhileCommited, _) => err
+                   (_, True) => err
+                   (Nothing, False) => case (assert_total doParse s Nothing consumed y xs) of
+                             err@(Failure e2) =>
+                               case e2.commit of
                                   Just consumedWhileCommited => err
                                   -- FURTHEST-FAILURE TRACKING: keep
                                   -- the branch error that reached
@@ -468,7 +515,7 @@ parseAll : st
         -> Either (ParsingError tok st) (st, Maybe Range, ty)
 parseAll st act xs = do
   (st, b, x, []) <- parseWith st act xs
-    | (st, b, x, leftover@((next, _) :: _)) => Left (Error ["Some input left unconsumed"] st (map end b) (Left next) leftover)
+    | (st, b, x, leftover@((next, _) :: _)) => Left (Error ["Some input left unconsumed"] st (map end b) (Left next) leftover False)
   Right (st, b, x)
 
 -----------------------------------------
@@ -710,10 +757,18 @@ public export
 thatMany : (n : Nat) -> Grammar s tok a -> Grammar s tok (Vect n a)
 thatMany n g = seqVect (replicate n g)
 
+||| A branch rejection when the condition does not hold — see `fail`
+||| for why the message may not be the one reported.
 public export
 guard : String -> Bool -> Grammar s tok ()
 guard msg True = pure ()
 guard msg False = fail msg
+
+||| `guard` whose failure is a verdict — see `fatal`.
+public export
+fatalGuard : String -> Bool -> Grammar s tok ()
+fatalGuard msg True = pure ()
+fatalGuard msg False = fatal msg
 
 public export
 mapState : (s -> s', s' -> s) -> Grammar s tok a -> Grammar s' tok a
@@ -721,7 +776,7 @@ mapState f (Empty val) = Empty val
 mapState f (Terminal str x) = Terminal str x
 mapState f (NextIs str x) = NextIs str x
 mapState f EOF = EOF
-mapState f (Fail location str) = Fail location str
+mapState f (Fail fat location str) = Fail fat location str
 mapState f Commit = Commit
 mapState f (Bind x y) = do
   v <- mapState f x
